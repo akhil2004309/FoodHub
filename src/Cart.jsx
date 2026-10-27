@@ -1,9 +1,11 @@
-
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import Navbar from "./Navbar";
 import "./App.css";
 
 export default function Cart() {
+  const navigate = useNavigate();
+
   const [cart, setCart] = useState(() => {
     try {
       const savedCart = JSON.parse(
@@ -99,7 +101,7 @@ export default function Cart() {
     setShowPayment(true);
   };
 
-  // Complete  payment
+  // Complete payment
   const handleDummyPayment = () => {
     if (paymentLoading) return;
 
@@ -210,14 +212,31 @@ export default function Cart() {
             </button>
           </div>
         ) : cart.length === 0 ? (
-          <p>
-            Your cart is empty. Add some delicious food first!
-          </p>
+          <div className="empty-cart-card">
+            <img
+              src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80"
+              alt="FoodHub delicious dishes"
+              className="empty-cart-img"
+            />
+            <div className="empty-cart-body">
+              <h2>Your FoodHub Cart is Empty 🍔</h2>
+              <p>
+                Delicious gourmet food is just a click away! Browse our menu and fill your cart with your favorites.
+              </p>
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={() => navigate("/home")}
+              >
+                Browse Menu
+              </button>
+            </div>
+          </div>
         ) : (
-          <>
+          <div className="cart-grid-layout">
             <div className="cart-list">
               {cart.map((item) => (
-                <div className="kitchen-item" key={item.id}>
+                <div className="kitchen-item cart-item-card" key={item.id}>
                   <img
                     src={item.image}
                     alt={item.name}
@@ -225,9 +244,19 @@ export default function Cart() {
                   />
 
                   <div className="cart-details">
-                    <h3>{item.name}</h3>
+                    <div className="cart-title-row">
+                      <h3>{item.name}</h3>
+                      <button
+                        type="button"
+                        className="remove-btn icon-remove-btn"
+                        onClick={() => removeItem(item.id)}
+                        title="Remove dish"
+                      >
+                        ✕
+                      </button>
+                    </div>
 
-                    <p>₹{item.price}</p>
+                    <p className="cart-item-price">₹{item.price}</p>
 
                     <div className="quantity-control">
                       <button
@@ -251,36 +280,47 @@ export default function Cart() {
                       </button>
                     </div>
 
-                    <p>
+                    <p className="cart-subtotal">
                       Subtotal: ₹
                       {Number(item.price) *
                         Number(item.quantity)}
                     </p>
                   </div>
 
-                  <button
-                    type="button"
-                    className="remove-btn"
-                    onClick={() => removeItem(item.id)}
-                  >
-                    Remove
-                  </button>
+                  <div className="cart-item-fudhub-badge">
+                    <span className="fudhub-tag">🍽️ FoodHub</span>
+                    <span className="fudhub-pill">Fresh & Sizzling 🔥</span>
+                  </div>
                 </div>
               ))}
             </div>
 
-            <div className="cart-summary">
-              <h2>Total: ₹{total.toFixed(2)}</h2>
+            <div className="cart-sidebar">
+              <div className="cart-summary">
+                <h2>Total: ₹{total.toFixed(2)}</h2>
 
-              <button
-                type="button"
-                className="primary-btn"
-                onClick={handlePayNow}
-              >
-                Pay Now
-              </button>
+                <button
+                  type="button"
+                  className="primary-btn"
+                  onClick={handlePayNow}
+                >
+                  Pay Now
+                </button>
+              </div>
+
+              <div className="cart-fudhub-promo">
+                <img
+                  src="https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=800&q=80"
+                  alt="FoodHub Culinary Specials"
+                  className="fudhub-promo-image"
+                />
+                <div className="fudhub-promo-content">
+                  <h4>🍽️ FoodHub Kitchen Guarantee</h4>
+                  <p>100% freshly cooked with premium ingredients. Delivered warm & delicious to your doorstep!</p>
+                </div>
+              </div>
             </div>
-          </>
+          </div>
         )}
 
         {showPayment && !placedOrder && (
