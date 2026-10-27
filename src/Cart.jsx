@@ -4,8 +4,6 @@ import Navbar from "./Navbar";
 import "./App.css";
 
 export default function Cart() {
-  const [paymentLoading, setPaymentLoading] = useState(false);
-
   const [cart, setCart] = useState(() => {
     try {
       const savedCart = JSON.parse(
@@ -18,24 +16,22 @@ export default function Cart() {
   });
 
   const [placedOrder, setPlacedOrder] = useState(null);
+  const [showPayment, setShowPayment] = useState(false);
+  const [paymentLoading, setPaymentLoading] = useState(false);
 
-  // Save cart in React state and localStorage
   const saveCart = (updatedCart) => {
     setCart(updatedCart);
     localStorage.setItem("cart", JSON.stringify(updatedCart));
   };
 
-  // Increase or decrease food quantity
+  // Change quantity
   const changeQuantity = (id, amount) => {
     const updatedCart = cart
       .map((item) =>
         item.id === id
           ? {
               ...item,
-              quantity: Math.max(
-                0,
-                Number(item.quantity || 0) + amount
-              ),
+              quantity: Number(item.quantity) + amount,
             }
           : item
       )
@@ -44,260 +40,122 @@ export default function Cart() {
     saveCart(updatedCart);
   };
 
-  // Remove food from cart
+  // Remove item
   const removeItem = (id) => {
     saveCart(cart.filter((item) => item.id !== id));
   };
 
-  // Calculate cart total for display
+  // Calculate total
   const total = cart.reduce(
     (sum, item) =>
       sum + Number(item.price) * Number(item.quantity),
     0
   );
 
-  // Load Razorpay Checkout script
-  const loadRazorpay = () => {
-    return new Promise((resolve) => {
-      if (window.Razorpay) {
-        resolve(true);
-        return;
-      }
+  const cartCount = cart.reduce(
+    (sum, item) => sum + Number(item.quantity || 0),
+    0
+  );
 
-      const script = document.createElement("script");
-      script.src =
-        "https://checkout.razorpay.com/v1/checkout.js";
-
-      script.onload = () => resolve(true);
-      script.onerror = () => resolve(false);
-
-      document.body.appendChild(script);
-    });
-  };
-
-  // Start Razorpay payment
-  const handlePayNow = async () => {
-    if (paymentLoading) return;
-
+  // Open dummy payment popup
+  const handlePayNow = () => {
     if (cart.length === 0) {
       alert("Your cart is empty.");
       return;
     }
 
-    // Validate quantities before sending them to the backend
-    const invalidItem = cart.find(
-      (item) =>
+    let currentFoods = [];
+
+    try {
+      const savedFoods = JSON.parse(
+        localStorage.getItem("availableFoods") || "[]"
+      );
+
+      currentFoods = Array.isArray(savedFoods) ? savedFoods : [];
+    } catch {
+      currentFoods = [];
+    }
+
+    const unavailableItem = cart.find((item) => {
+      const currentFood = currentFoods.find(
+        (food) => String(food.id) === String(item.id)
+      );
+
+      return (
+        !currentFood ||
+        !currentFood.available ||
         !Number.isSafeInteger(Number(item.quantity)) ||
         Number(item.quantity) < 1
-    );
+      );
+    });
 
-    if (invalidItem) {
-      alert("Please check the quantities in your cart.");
+    if (unavailableItem) {
+      alert(
+        `${unavailableItem.name} is unavailable or has an invalid quantity. Please update your cart.`
+      );
       return;
     }
+
+    setShowPayment(true);
+  };
+
+  // Complete  payment
+  const handleDummyPayment = () => {
+    if (paymentLoading) return;
 
     setPaymentLoading(true);
 
     try {
-      // Check current availability in localStorage.
-      // The backend must independently validate its trusted menu.
-      let currentFoods;
+      const token = Math.floor(1000 + Math.random() * 9000);
 
-      try {
-        currentFoods = JSON.parse(
-          localStorage.getItem("availableFoods") || "[]"
-        );
-
-        if (!Array.isArray(currentFoods)) {
-          currentFoods = [];
-        }
-      } catch {
-        currentFoods = [];
-      }
-
-      const unavailableItem = cart.find((item) => {
-        const currentFood = currentFoods.find(
-          (food) => String(food.id) === String(item.id)
-        );
-
-        return !currentFood || !currentFood.available;
-      });
-
-      if (unavailableItem) {
-        alert(
-          `${unavailableItem.name} is currently unavailable. Please remove it from your cart.`
-        );
-        setPaymentLoading(false);
-        return;
-      }
-
-      // Load Razorpay Checkout
-      const loaded = await loadRazorpay();
-
-      if (!loaded) {
-        throw new Error(
-          "Unable to load Razorpay Checkout. Please try again."
-        );
-      }
-
-      // Create order on backend.
-      // Send IDs and quantities, never trust frontend prices.
-      const orderResponse = await fetch(
-        "http://localhost:3001/api/payment/create-order",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            items: cart.map((item) => ({
-              id: String(item.id),
-              quantity: Number(item.quantity),
-            })),
-          }),
-        }
-      );
-
-      const orderData = await orderResponse.json();
-
-      if (!orderResponse.ok) {
-        throw new Error(
-          orderData.message || "Unable to create payment order."
-        );
-      }
-
-      // Configure Razorpay Checkout
-      const options = {
-        key: orderData.keyId,
-        amount: orderData.amount,
-        currency: orderData.currency,
-        name: "FoodHub",
-        description: "Food order payment",
-        order_id: orderData.orderId,
-
-        handler: async (response) => {
-          try {
-            // Verify payment on backend
-            const verifyResponse = await fetch(
-              "http://localhost:3001/api/payment/verify",
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify(response),
-              }
-            );
-
-            const result = await verifyResponse.json();
-
-            if (!verifyResponse.ok || !result.verified) {
-              throw new Error(
-                result.message ||
-                  "Payment could not be verified."
-              );
-            }
-
-            // Read existing order history safely
-            let previousOrders = [];
-
-            try {
-              const savedOrders = JSON.parse(
-                localStorage.getItem("orderHistory") || "[]"
-              );
-
-              if (Array.isArray(savedOrders)) {
-                previousOrders = savedOrders;
-              }
-            } catch {
-              previousOrders = [];
-            }
-
-            // Preserve food images for the kitchen UI
-            const verifiedItems = result.items.map((item) => {
-              const cartItem = cart.find(
-                (existing) =>
-                  String(existing.id) === String(item.id)
-              );
-
-              return {
-                ...item,
-                image: cartItem?.image || "",
-              };
-            });
-
-            // Generate a four-digit demo token
-            const token = Math.floor(
-              1000 + Math.random() * 9000
-            );
-
-            // Create order only after server verification
-            const newOrder = {
-              id: token,
-              createdAt: new Date().toISOString(),
-              items: verifiedItems,
-              total: result.total,
-              status: "Pending",
-              readyAt: null,
-              paymentId: result.paymentId,
-            };
-
-            localStorage.setItem(
-              "orderHistory",
-              JSON.stringify([...previousOrders, newOrder])
-            );
-
-            // Clear cart after successful verification
-            localStorage.setItem("cart", JSON.stringify([]));
-            setCart([]);
-            setPlacedOrder(newOrder);
-          } catch (error) {
-            console.error("Payment verification error:", error);
-
-            alert(
-              error.message ||
-                "We couldn't confirm your payment. Check payment status before retrying."
-            );
-          } finally {
-            setPaymentLoading(false);
-          }
-        },
-
-        modal: {
-          ondismiss: () => {
-            setPaymentLoading(false);
-          },
-        },
-
-        theme: {
-          color: "#3399cc",
-        },
+      const newOrder = {
+        id: token,
+        createdAt: new Date().toISOString(),
+        items: cart.map((item) => ({
+          id: item.id,
+          name: item.name,
+          price: Number(item.price),
+          quantity: Number(item.quantity),
+          image: item.image || "",
+        })),
+        total,
+        status: "Pending",
+        readyAt: null,
+        paymentMethod: "Dummy Payment",
+        paymentStatus: " Successful",
       };
 
-      const checkout = new window.Razorpay(options);
+      let previousOrders = [];
 
-      checkout.on("payment.failed", (response) => {
-        console.error(
-          "Razorpay payment failed:",
-          response.error
+      try {
+        const savedOrders = JSON.parse(
+          localStorage.getItem("orderHistory") || "[]"
         );
 
-        alert("Payment failed. Please try again.");
-        setPaymentLoading(false);
-      });
+        previousOrders = Array.isArray(savedOrders)
+          ? savedOrders
+          : [];
+      } catch {
+        previousOrders = [];
+      }
 
-      checkout.open();
+      localStorage.setItem(
+        "orderHistory",
+        JSON.stringify([...previousOrders, newOrder])
+      );
+
+      localStorage.setItem("cart", JSON.stringify([]));
+
+      setCart([]);
+      setShowPayment(false);
+      setPlacedOrder(newOrder);
     } catch (error) {
-      console.error("Payment error:", error);
-      alert(error.message || "Unable to start payment.");
+      console.error(" order error:", error);
+      alert("Unable to place the  order.");
+    } finally {
       setPaymentLoading(false);
     }
   };
-
-  const cartCount = cart.reduce(
-    (sum, item) => sum + Number(item.quantity || 0),
-    0
-  );
 
   return (
     <>
@@ -310,6 +168,8 @@ export default function Cart() {
           <div className="payment-success">
             <h2>✅ Order Placed Successfully!</h2>
 
+            <p> payment completed successfully.</p>
+
             <p>Your order token is:</p>
 
             <h1 className="order-token">
@@ -317,7 +177,8 @@ export default function Cart() {
             </h1>
 
             <p>
-              Please wait while the kitchen prepares your food.
+              Total paid (): ₹
+              {Number(placedOrder.total).toFixed(2)}
             </p>
 
             <div className="waiting-status">
@@ -356,10 +217,7 @@ export default function Cart() {
           <>
             <div className="cart-list">
               {cart.map((item) => (
-                <div
-                  className="kitchen-item"
-                  key={item.id}
-                >
+                <div className="kitchen-item" key={item.id}>
                   <img
                     src={item.image}
                     alt={item.name}
@@ -374,7 +232,6 @@ export default function Cart() {
                     <div className="quantity-control">
                       <button
                         type="button"
-                        disabled={paymentLoading}
                         onClick={() =>
                           changeQuantity(item.id, -1)
                         }
@@ -386,7 +243,6 @@ export default function Cart() {
 
                       <button
                         type="button"
-                        disabled={paymentLoading}
                         onClick={() =>
                           changeQuantity(item.id, 1)
                         }
@@ -405,7 +261,6 @@ export default function Cart() {
                   <button
                     type="button"
                     className="remove-btn"
-                    disabled={paymentLoading}
                     onClick={() => removeItem(item.id)}
                   >
                     Remove
@@ -415,22 +270,56 @@ export default function Cart() {
             </div>
 
             <div className="cart-summary">
-              <h2>Total: ₹{total}</h2>
+              <h2>Total: ₹{total.toFixed(2)}</h2>
 
               <button
                 type="button"
                 className="primary-btn"
                 onClick={handlePayNow}
-                disabled={
-                  paymentLoading || cart.length === 0
-                }
               >
-                {paymentLoading
-                  ? "Processing..."
-                  : "Pay Now"}
+                Pay Now
               </button>
             </div>
           </>
+        )}
+
+        {showPayment && !placedOrder && (
+          <div className="dummy-payment-overlay">
+            <div className="dummy-payment-box">
+              <h2>💳 FoodHub Payment</h2>
+
+              <p> payment </p>
+
+              <div className="dummy-payment-total">
+                <span>Order total</span>
+                <strong>₹{total.toFixed(2)}</strong>
+              </div>
+
+              <p className="dummy-payment-note">
+                
+              </p>
+
+              <button
+                type="button"
+                className="primary-btn"
+                disabled={paymentLoading}
+                onClick={handleDummyPayment}
+              >
+                {paymentLoading
+                  ? "Processing..."
+                  : `Pay ₹${total.toFixed(2)}`}
+              </button>
+
+              <button
+                type="button"
+                className="remove-btn"
+                disabled={paymentLoading}
+                onClick={() => setShowPayment(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         )}
       </main>
     </>
